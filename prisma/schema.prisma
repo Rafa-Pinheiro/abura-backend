@@ -7,4 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// TODO: adicionar models (Ocorrencia, Usuario, etc.)
+model Ocorrencia {
+  id                     String   @id @default(uuid())
+  protocoloDeAtendimento String   @unique
+  hashDoCPF              String
+  nomeDoSolicitante      String
+  idade                  Int
+  telefone               String
+  descricaoDaEmergencia  String
+  sintomas               String[]
+  comorbidades           String[]
+  status                 String   @default("aguardando_regulacao_medica")
+  criadoEm               DateTime @default(now())
+  atualizadoEm           DateTime @updatedAt
+  latitude               Float?
+  longitude              Float?
+
+  @@map("ocorrencias")
+}

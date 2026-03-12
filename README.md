@@ -3,6 +3,8 @@ API + WebSocket + Algoritmos
 
 API REST e WebSocket para o Sistema de Regulação Médica Emergencial.
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 ## Stack
 
 - Node.js 20 + TypeScript
