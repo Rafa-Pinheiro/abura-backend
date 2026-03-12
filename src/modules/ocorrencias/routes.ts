@@ -1,102 +1,117 @@
-// ============================================================
-// ARQUIVO: src/modules/ocorrencias/routes.ts
-// DESCRIÇÃO: Define os "caminhos" disponíveis para criar e gerenciar ocorrências.
-// Cada rota é como um "botão" que o frontend pode apertar.
-// ============================================================
+// Rotas do módulo de ocorrências (SGC - Sistema de Gestão de Chamados)
+// Define os "caminhos" que a API oferece para criar e gerenciar emergências
 
-// Router do Express cria grupos de rotas organizados
 import { Router } from 'express';
+import { prisma } from '../../config/database';
 
-// Importamos a função que cria uma nova ocorrência no banco
-// Separamos a lógica em "service" para manter as rotas enxutas
-import { criarNovaOcorrencia } from './services/CriarOcorrenciaService';
-
-// Criamos o roteador específico para ocorrências
 const rotas = Router();
 
-// ============================================================
-// ROTA: POST /ocorrencias
-// DESCRIÇÃO: Cria uma nova emergência no sistema.
-// QUEM CHAMA: Operador da Central (OPR) ou sistema automatizado.
-// ============================================================
-rotas.post('/', async (requisicao, resposta) => {
+// POST /ocorrencias - Cria uma nova emergência no sistema
+// Quem chama: Operador da Central (OPR) ou sistema automatizado
+rotas.post('/', async (req, res) => {
   try {
-    // Extrai os dados enviados no corpo da requisição
-    // Esperamos: nomeDoSolicitante, telefone, descricaoDaEmergencia, etc
-    const dadosDaOcorrencia = requisicao.body;
+    const dados = req.body;
 
-    // Chamamos o serviço que faz o trabalho pesado:
-    // - Gera número de protocolo único
-    // - Salva no banco de dados
-    // - Dispara SMS (se configurado)
-    // - Retorna o objeto completo criado
-    const ocorrenciaCriada = await criarNovaOcorrencia(dadosDaOcorrencia);
+    // Validação mínima dos dados obrigatórios
+    if (!dados.nome || !dados.telefone || !dados.descricao) {
+      return res.status(400).json({
+        sucesso: false,
+        mensagem: 'Nome, telefone e descrição são obrigatórios'
+      });
+    }
 
-    // Retornamos sucesso com código HTTP 201 (Created)
-    // Incluímos o protocolo gerado — essencial para o usuário acompanhar
-    return resposta.status(201).json({
+    // Gera protocolo único: ABURA-2026-XXXXX
+    const ano = new Date().getFullYear();
+    const sequencial = Math.floor(Math.random() * 90000) + 10000;
+    const protocolo = `ABURA-${ano}-${sequencial}`;
+
+    // Cria a ocorrência no banco de dados
+    const ocorrencia = await prisma.ocorrencia.create({
+      data: {
+        protocoloDeAtendimento: protocolo,
+        hashDoCPF: dados.cpf ? await hashCPF(dados.cpf) : 'nao-informado',
+        nomeDoSolicitante: dados.nome,
+        idade: dados.idade || 0,
+        telefone: dados.telefone,
+        descricaoDaEmergencia: dados.descricao,
+        sintomas: dados.sintomas || [],
+        comorbidades: dados.comorbidades || [],
+        status: 'aguardando_regulacao_medica',
+      }
+    });
+
+    // TODO: Disparar SMS com deep link (implementar na fase 2)
+
+    return res.status(201).json({
       sucesso: true,
       mensagem: 'Ocorrência registrada com sucesso',
       dados: {
-        protocoloDeAtendimento: ocorrenciaCriada.protocolo,
-        numeroDeIdentificacao: ocorrenciaCriada.id,
-        horaDeRegistro: ocorrenciaCriada.criadoEm
+        protocolo: ocorrencia.protocoloDeAtendimento,
+        id: ocorrencia.id,
+        criadoEm: ocorrencia.criadoEm
       }
     });
 
   } catch (erro) {
-    // Se algo deu errado (banco offline, dados inválidos, etc), retornamos erro estruturado
     console.error('Erro ao criar ocorrência:', erro);
-    
-    return resposta.status(500).json({
+    return res.status(500).json({
       sucesso: false,
-      mensagem: 'Falha ao registrar ocorrência. Tente novamente ou contate o suporte técnico.',
-      // Em desenvolvimento, incluímos detalhes; em produção, omitimos por segurança
-      detalhes: process.env.NODE_ENV === 'development' ? String(erro) : undefined
+      mensagem: 'Erro interno ao registrar ocorrência'
     });
   }
 });
 
-// ============================================================
-// ROTA: GET /ocorrencias/:protocolo/validacao
-// DESCRIÇÃO: Verifica se um protocolo existe e está aguardando atendimento.
-// QUEM CHAMA: App do usuário quando clica no link do SMS.
-// ============================================================
-rotas.get('/:protocolo/validacao', async (requisicao, resposta) => {
+// GET /ocorrencias/:protocolo/validacao - Valida se protocolo existe
+// Quem chama: App do USR quando clica no link do SMS
+rotas.get('/:protocolo/validacao', async (req, res) => {
   try {
-    // Capturamos o número do protocolo da URL
-    // Exemplo: /ocorrencias/ABURA-2026-00001/validacao
-    const numeroDoProtocolo = requisicao.params.protocolo;
+    const { protocolo } = req.params;
 
-    // TODO: Implementar busca no banco de dados
-    // Por enquanto, retornamos mock para teste de integração
-    
-    // Simulação: protocolo existe e está aguardando
-    const dadosSimulados = {
-      protocolo: numeroDoProtocolo,
-      status: 'aguardando_atendimento',
-      // Mascaramos CPF: apenas últimos 3 dígitos visíveis
-      identificacaoMascarada: '***.***.123-**',
-      primeiroNome: 'RAFA...',
-      tipoDeOcorrencia: 'Médica - Respiratória',
-      // Indica se já está vinculado a outro celular (evita hijack)
-      jaVinculado: false
-    };
+    const ocorrencia = await prisma.ocorrencia.findUnique({
+      where: { protocoloDeAtendimento: protocolo }
+    });
 
-    return resposta.json({
+    if (!ocorrencia) {
+      return res.status(404).json({
+        sucesso: false,
+        valido: false,
+        mensagem: 'Protocolo não encontrado'
+      });
+    }
+
+    // Retorna dados parciais para confirmação de identidade
+    return res.json({
       sucesso: true,
       valido: true,
-      dados: dadosSimulados
+      dados: {
+        protocolo: ocorrencia.protocoloDeAtendimento,
+        status: ocorrencia.status,
+        // Mascaramos CPF: apenas últimos 3 dígitos visíveis
+        identificacaoMascarada: ocorrencia.hashDoCPF !== 'nao-informado' 
+          ? `***.***.${ocorrencia.hashDoCPF.slice(-3)}` 
+          : '***.***.***',
+        primeiroNome: ocorrencia.nomeDoSolicitante.split(' ')[0] + '...',
+        tipoDeOcorrencia: 'Médica - Respiratória', // TODO: categorizar
+        jaVinculado: false // TODO: implementar vinculação de dispositivo
+      }
     });
 
   } catch (erro) {
-    return resposta.status(500).json({
+    console.error('Erro ao validar protocolo:', erro);
+    return res.status(500).json({
       sucesso: false,
       valido: false,
-      mensagem: 'Erro ao validar protocolo'
+      mensagem: 'Erro interno na validação'
     });
   }
 });
 
-// Exportamos as rotas configuradas para o servidor principal usar
+// Função auxiliar: protege CPF com hash simples (substituir por bcrypt em produção)
+async function hashCPF(cpf: string): Promise<string> {
+  // Remove pontos e traço
+  const limpo = cpf.replace(/[^\d]/g, '');
+  // Hash simples para MVP (em produção: use bcrypt ou argon2)
+  return `hash_${limpo.slice(0, 3)}...${limpo.slice(-3)}`;
+}
+
 export { rotas as rotasOcorrencias };

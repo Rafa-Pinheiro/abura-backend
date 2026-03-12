@@ -1,59 +1,53 @@
-import express from 'express';
-import { PrismaClient } from '@prisma/client';
-import dotenv from 'dotenv';
+// Ponto de entrada da aplicação Abura
+// Inicia servidor HTTP, conecta no banco e registra todas as rotas
 
-// Carrega variáveis de ambiente
+import express from 'express';
+import dotenv from 'dotenv';
+import { conectarBancoDeDados } from './config/database';
+import { rotasOcorrencias } from './modules/ocorrencias/routes';
+
+// Carrega variáveis de ambiente do arquivo .env
 dotenv.config();
 
 // Cria aplicação Express
 const app = express();
-const prisma = new PrismaClient();
 
-// Middleware para entender JSON
+// Middleware para entender JSON no corpo das requisições
 app.use(express.json());
 
-// Rota de saúde — testa se servidor está vivo
+// Rota de saúde - verifica se servidor está vivo
+// Usada por monitoramento e health checks
 app.get('/saude', (req, res) => {
-  res.json({ status: 'ok', momento: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    momento: new Date().toISOString(),
+    versao: '1.0.0'
+  });
 });
 
-// Rota POST /ocorrencias — cria nova emergência
-app.post('/ocorrencias', async (req, res) => {
+// Registra rotas do módulo de ocorrências
+// Todas as rotas em rotasOcorrencias ficam prefixadas com /ocorrencias
+app.use('/ocorrencias', rotasOcorrencias);
+
+// Função principal que inicia tudo
+async function iniciarServidor(): Promise<void> {
   try {
-    const dados = req.body;
-    
-    // Gera protocolo simples (mock)
-    const ano = new Date().getFullYear();
-    const sequencial = Math.floor(Math.random() * 90000) + 10000;
-    const protocolo = `ABURA-${ano}-${sequencial}`;
+    // Conecta no PostgreSQL antes de aceitar requisições
+    console.log('🔌 Conectando ao banco de dados...');
+    await conectarBancoDeDados();
 
-    // Salva no banco
-    const ocorrencia = await prisma.ocorrencia.create({
-      data: {
-        protocoloDeAtendimento: protocolo,
-        hashDoCPF: dados.cpf || 'hash-temporario',
-        nomeDoSolicitante: dados.nome,
-        idade: dados.idade || 0,
-        telefone: dados.telefone,
-        descricaoDaEmergencia: dados.descricao,
-        sintomas: dados.sintomas || [],
-        comorbidades: dados.comorbidades || [],
-      }
+    // Inicia servidor HTTP
+    const PORTA = process.env.PORT || 3000;
+    app.listen(PORTA, () => {
+      console.log(`🚀 Servidor Abura rodando na porta ${PORTA}`);
+      console.log(`📡 Teste: http://localhost:${PORTA}/saude`);
     });
 
-    res.status(201).json({
-      sucesso: true,
-      protocolo: ocorrencia.protocoloDeAtendimento,
-      id: ocorrencia.id
-    });
   } catch (erro) {
-    console.error(erro);
-    res.status(500).json({ sucesso: false, erro: 'Erro ao criar ocorrência' });
+    console.error('❌ Falha ao iniciar:', erro);
+    process.exit(1); // Encerra com erro se não conseguir conectar no banco
   }
-});
+}
 
-// Inicia servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor Abura rodando na porta ${PORT}`);
-});
+// Executa a inicialização
+iniciarServidor();

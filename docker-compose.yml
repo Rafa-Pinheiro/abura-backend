@@ -1,134 +1,57 @@
-# ============================================================
-# ARQUIVO: docker-compose.yml
-# DESCRIÇÃO: Orquestração completa do ambiente de desenvolvimento.
-# Um comando sobe tudo: banco, cache, e aplicação.
-# ============================================================
-
 version: '3.8'
 
-# Rede virtual que permite os containers conversarem entre si
-# Cada container "vê" os outros pelo nome de serviço (ex: postgres, redis)
-networks:
-  rede-abura:
-    driver: bridge
-
-# Volumes persistentes — dados sobrevivem mesmo se container morrer
-volumes:
-  dados-postgres:    # Banco de dados da aplicação
-  dados-redis:       # Cache e sessões
-  node-modules:      # Dependências npm (evita reinstalar toda vez)
-
 services:
-  # ==========================================================
-  # SERVIÇO: API Node.js (nosso backend)
-  # ==========================================================
   api:
     build:
-      context: .                          # Pasta raiz do projeto
-      dockerfile: docker/Dockerfile.dev  # Config de build para dev
-    container_name: abura-api            # Nome amigável no docker ps
-    restart: unless-stopped              # Se cair, sobe sozinho (exceto se você parar manualmente)
-    
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: abura-api
+    restart: unless-stopped
     ports:
-      - "3000:3000"                      # Mapeia porta 3000 do container → 3000 do seu PC
-    
+      - "3000:3000"
     environment:
-      # NODE_ENV define comportamentos: development = logs verbosos, hot-reload
-      NODE_ENV: development
-      # URL de conexão com PostgreSQL — note o nome do serviço 'postgres' como host
-      DATABASE_URL: postgresql://abura:senha-abura@postgres:5432/abura-db?schema=public
-      # URL do Redis — mesmo esquema, nome do serviço como host
-      REDIS_URL: redis://redis:6379
-      # Segredo para assinar tokens JWT (troque em produção!)
-      JWT_SECRET: chave-secreta-desenvolvimento-mude-na-producao
-      # URL onde o frontend rodará (para CORS)
-      FRONTEND_URL: http://localhost:3001
-    
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://abura:senha-abura123@postgres:5432/abura-db?schema=public
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev-secret-change-in-production
+      - FRONTEND_URL=http://localhost:3001
     volumes:
-      # Sincroniza código do seu PC com container — mudanças refletem instantaneamente
       - .:/app
-      # Volume anônimo: node_modules fica no container (evita conflito de SO)
-      - node-modules:/app/node_modules
-    
+      - /app/node_modules
     depends_on:
-      # Sobe só depois que postgres e redis estão saudáveis
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
-    
-    # Comando que roda quando container inicia
-    command: sh -c "npx prisma generate && npm start"  # ts-node-dev com hot-reload
-    
-    networks:
-      - rede-abura
+    command: npm run dev
 
-  # ==========================================================
-  # SERVIÇO: PostgreSQL + PostGIS (banco de dados)
-  # ==========================================================
   postgres:
-    image: postgis/postgis:15-3.4-alpine  # Alpine = versão enxuta e rápida
+    image: postgis/postgis:15-3.4-alpine
     container_name: abura-postgres
     restart: unless-stopped
-    
     environment:
-      POSTGRES_USER: abura           # Usuário administrador do banco
-      POSTGRES_PASSWORD: senha-abura  # Senha (mude em produção!)
-      POSTGRES_DB: abura-db          # Nome do banco criado automaticamente
-    
+      POSTGRES_USER: abura
+      POSTGRES_PASSWORD: senha-abura123
+      POSTGRES_DB: abura-db
     ports:
-      - "5432:5432"  # Permite conectar do seu PC com DBeaver/TablePlus
-    
+      - "5432:5432"
     volumes:
-      # Persiste dados mesmo se container for destruído e recriado
-      - dados-postgres:/var/lib/postgresql/data
-    
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      # Teste: tenta executar 'pg_isready' a cada 5 segundos
       test: ["CMD-SHELL", "pg_isready -U abura -d abura-db"]
-      interval: 5s      # Verifica a cada 5 segundos
-      timeout: 5s       # Considera falha se demorar mais de 5s
-      retries: 5        # Desiste após 5 falhas seguidas
-      start_period: 10s # Dá 10 segundos de tolerância no início
-    
-    networks:
-      - rede-abura
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  # ==========================================================
-  # SERVIÇO: Redis (cache e tempo real)
-  # ==========================================================
   redis:
     image: redis:7-alpine
     container_name: abura-redis
     restart: unless-stopped
-    
     ports:
-      - "6379:6379"  # Permite conectar com Redis Insight/CLI do PC
-    
+      - "6379:6379"
     volumes:
-      - dados-redis:/data
-    
-    # Redis não precisa de healthcheck complexo — é muito rápido
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-    
-    networks:
-      - rede-abura
+      - redis_data:/data
 
-  # ==========================================================
-  # SERVIÇO OPCIONAL: Adminer (gerenciador de banco via navegador)
-  # Acesse: http://localhost:8080
-  # ==========================================================
-  adminer:
-    image: adminer:latest
-    container_name: abura-adminer
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      ADMINER_DEFAULT_SERVER: postgres  # Preenche automaticamente o host
-    depends_on:
-      - postgres
-    networks:
-      - rede-abura
+volumes:
+  postgres_data:
+  redis_data:
