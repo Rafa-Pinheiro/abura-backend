@@ -58,7 +58,7 @@ services:
         condition: service_started
     
     # Comando que roda quando container inicia
-    command: npm run dev  # ts-node-dev com hot-reload
+    command: sh -c "npx prisma generate && npm start"  # ts-node-dev com hot-reload
     
     networks:
       - rede-abura
