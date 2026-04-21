@@ -1,53 +1,75 @@
 // Ponto de entrada da aplicação Abura
-// Inicia servidor HTTP, conecta no banco e registra todas as rotas
+
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Carrega variáveis de ambiente do arquivo correto
+dotenv.config({ path: path.resolve(__dirname, '../.env.development') });
+
+// DEBUG: Mostra se as variáveis foram carregadas
+console.log('🔍 DEBUG - DATABASE_URL:', process.env.DATABASE_URL || 'NÃO CARREGADA');
+console.log('🔍 DEBUG - NODE_ENV:', process.env.NODE_ENV || 'NÃO CARREGADA');
 
 import express from 'express';
-import dotenv from 'dotenv';
-import { conectarBancoDeDados } from './config/database';
-import { rotasOcorrencias } from './modules/ocorrencias/routes';
+import { PrismaClient } from '@prisma/client';
 
-// Carrega variáveis de ambiente do arquivo .env
-dotenv.config();
-
-// Cria aplicação Express
 const app = express();
-
-// Middleware para entender JSON no corpo das requisições
 app.use(express.json());
 
-// Rota de saúde - verifica se servidor está vivo
-// Usada por monitoramento e health checks
+// Rota de saúde
 app.get('/saude', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    momento: new Date().toISOString(),
-    versao: '1.0.0'
-  });
+  res.json({ status: 'ok', momento: new Date().toISOString() });
 });
 
-// Registra rotas do módulo de ocorrências
-// Todas as rotas em rotasOcorrencias ficam prefixadas com /ocorrencias
-app.use('/ocorrencias', rotasOcorrencias);
-
-// Função principal que inicia tudo
-async function iniciarServidor(): Promise<void> {
+// Teste de conexão direta com o banco
+app.get('/teste-banco', async (req, res) => {
+  const prisma = new PrismaClient();
   try {
-    // Conecta no PostgreSQL antes de aceitar requisições
-    console.log('🔌 Conectando ao banco de dados...');
-    await conectarBancoDeDados();
+    await prisma.$connect();
+    const resultado = await prisma.$queryRaw`SELECT 1 as teste`;
+    res.json({ sucesso: true, resultado });
+  } catch (erro: any) {
+    res.status(500).json({ 
+      sucesso: false, 
+      erro: erro.message,
+      codigo: erro.code,
+      meta: erro.meta 
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+});
 
-    // Inicia servidor HTTP
+async function iniciarServidor() {
+  try {
+    console.log('🔌 Testando conexão com banco...');
+    
+    const prisma = new PrismaClient({
+      log: ['query', 'info', 'warn', 'error'],
+    });
+    
+    // Tenta conectar com tratamento de erro detalhado
+    try {
+      await prisma.$connect();
+      console.log('✅ Banco conectado com sucesso');
+    } catch (erroDeConexao: any) {
+      console.error('❌ ERRO DETALHADO DA CONEXÃO:');
+      console.error('Mensagem:', erroDeConexao.message);
+      console.error('Código:', erroDeConexao.code);
+      console.error('Meta:', JSON.stringify(erroDeConexao.meta, null, 2));
+      console.error('Stack:', erroDeConexao.stack);
+      throw erroDeConexao; // Relança para parar o servidor
+    }
+    
     const PORTA = process.env.PORT || 3000;
     app.listen(PORTA, () => {
-      console.log(`🚀 Servidor Abura rodando na porta ${PORTA}`);
-      console.log(`📡 Teste: http://localhost:${PORTA}/saude`);
+      console.log(`🚀 Servidor rodando na porta ${PORTA}`);
     });
-
+    
   } catch (erro) {
-    console.error('❌ Falha ao iniciar:', erro);
-    process.exit(1); // Encerra com erro se não conseguir conectar no banco
+    console.error('❌ Falha fatal ao iniciar:', erro);
+    process.exit(1);
   }
 }
 
-// Executa a inicialização
 iniciarServidor();
